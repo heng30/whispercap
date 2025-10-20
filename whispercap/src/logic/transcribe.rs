@@ -2083,11 +2083,22 @@ fn optimize_subtitles_timestamp(ui: &AppWindow) {
     let ui_weak = ui.as_weak();
 
     tokio::spawn(async move {
+        let mean_rms = match transcribe::vad::estimate_rms_for_duration(&audio_path, 180) {
+            Ok(v) => v,
+            Err(e) => {
+                toast::async_toast_warn(ui_weak.clone(), format!("estimate rms failed: {e}"));
+                return;
+            }
+        };
+
+        let threshold = mean_rms / 3.0;
+        log::info!("mean_rms: {mean_rms}, threshold: {threshold}");
+
         let (ui_weak_duplicate, id_duplicate) = (ui_weak.clone(), id.clone());
         match transcribe::vad::trim_start_slient_duration_of_audio(
             &audio_path,
             &timestamps,
-            0.001,
+            threshold,
             get_progress_cancel_signal(),
             move |v| {
                 let (ui_weak, id_duplicate) = (ui_weak_duplicate.clone(), id_duplicate.clone());

@@ -203,6 +203,29 @@ pub fn trim_start_slient_duration_of_audio(
     Ok((output_timestamps, ProgressStatus::Finished))
 }
 
+pub fn estimate_rms_for_duration(
+    wav_path: impl AsRef<std::path::Path>,
+    duration_seconds: u32,
+) -> Result<f32> {
+    let audio_data = wav::read_file(wav_path)?;
+    let samples = if audio_data.config.channels > 1 {
+        audio_data.to_mono().samples
+    } else {
+        audio_data.samples
+    };
+
+    let sample_rate = audio_data.config.sample_rate;
+    let max_samples = duration_seconds as usize * sample_rate as usize;
+    let samples_to_process = if samples.len() > max_samples {
+        &samples[..max_samples]
+    } else {
+        &samples
+    };
+
+    let vad = EnergyVAD::new(sample_rate);
+    Ok(vad.calculate_rms(samples_to_process))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
