@@ -41,7 +41,7 @@ impl EnergyVAD {
         self
     }
 
-    pub fn calculate_rms(&self, samples: &[f32]) -> f32 {
+    pub fn calculate_rms(samples: &[f32]) -> f32 {
         let sum_squares: f32 = samples.iter().map(|&s| s * s).sum();
         (sum_squares / samples.len() as f32).sqrt()
     }
@@ -51,7 +51,7 @@ impl EnergyVAD {
             return false;
         }
 
-        let rms = self.calculate_rms(samples);
+        let rms = Self::calculate_rms(samples);
         // log::debug!(
         //     "audio samples rms: {rms}, threshold: {}. contain_speech: {}",
         //     self.threshold,
@@ -133,7 +133,7 @@ impl EnergyVAD {
 pub fn trim_start_slient_duration_of_audio(
     audio_path: impl AsRef<Path>,
     timestamps: &[(u64, u64)], // (ms, ms)
-    threshold: f32,            // [0, 1]
+    adaptive_threshold_factor: f32,
     cancel: Arc<AtomicBool>,
     mut progress_cb: impl FnMut(i32) + 'static,
 ) -> Result<(Vec<(u64, u64)>, ProgressStatus)> {
@@ -165,7 +165,6 @@ pub fn trim_start_slient_duration_of_audio(
             return Ok((vec![], ProgressStatus::Cancelled));
         }
 
-        let vad = EnergyVAD::new(sample_rate).with_threshold(threshold);
         let start_index = ((sample_rate as u64 * start_ms) as f64 / 1000.0) as usize;
         let end_index =
             (((sample_rate as u64 * end_ms) as f64 / 1000.0) as usize).min(total_indexs);
@@ -176,6 +175,10 @@ pub fn trim_start_slient_duration_of_audio(
         }
 
         let segmemt = &audio_samples[start_index..end_index];
+
+        let vad = EnergyVAD::new(sample_rate)
+            .with_threshold(EnergyVAD::calculate_rms(segmemt) * adaptive_threshold_factor);
+
         let silent_offset = vad.detect_silent_offset_ms(segmemt);
 
         // log::debug!("{index}: {silent_offset}");
@@ -222,8 +225,7 @@ pub fn estimate_rms_for_duration(
         &samples
     };
 
-    let vad = EnergyVAD::new(sample_rate);
-    Ok(vad.calculate_rms(samples_to_process))
+    Ok(EnergyVAD::calculate_rms(samples_to_process))
 }
 
 #[cfg(test)]
