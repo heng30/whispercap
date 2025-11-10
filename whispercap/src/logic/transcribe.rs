@@ -2087,7 +2087,7 @@ fn optimize_subtitles_timestamp(ui: &AppWindow) {
         match transcribe::vad::trim_start_slient_duration_of_audio(
             &audio_path,
             &timestamps,
-            0.5,
+            1.0,
             get_progress_cancel_signal(),
             move |v| {
                 let (ui_weak, id_duplicate) = (ui_weak_duplicate.clone(), id_duplicate.clone());
