@@ -101,7 +101,7 @@ impl EnergyVAD {
         segments
     }
 
-    fn detect_silent_offset_ms(&self, samples: &[f32]) -> u64 {
+    fn detect_leading_silent_duration_ms(&self, samples: &[f32]) -> u64 {
         let frame_size = ((self.sample_rate as u64 * self.frame_size_ms) as f32 / 1000.0) as usize;
         let frame_shift =
             ((self.sample_rate as u64 * self.frame_shift_ms) as f32 / 1000.0) as usize;
@@ -128,9 +128,39 @@ impl EnergyVAD {
 
         return 0;
     }
+
+    fn detect_trailing_silent_duration_ms(&self, samples: &[f32]) -> u64 {
+        let frame_size = ((self.sample_rate as u64 * self.frame_size_ms) as f32 / 1000.0) as usize;
+        let frame_shift =
+            ((self.sample_rate as u64 * self.frame_shift_ms) as f32 / 1000.0) as usize;
+
+        let total_frames = (samples.len() - frame_size + frame_shift - 1) / frame_shift;
+
+        for index in (0..total_frames).rev() {
+            let offset = index * frame_shift;
+            let frame_end = std::cmp::min(offset + frame_size, samples.len());
+            if offset >= frame_end {
+                return 0;
+            }
+
+            let frame = &samples[offset..frame_end];
+            let is_speech = self.contain_speech(frame);
+
+            if is_speech {
+                if index == total_frames - 1 {
+                    return 0;
+                } else {
+                    let silent_frames = total_frames - index - 1;
+                    return silent_frames as u64 * self.frame_shift_ms + self.frame_size_ms;
+                }
+            }
+        }
+
+        return 0;
+    }
 }
 
-pub fn trim_start_slient_duration_of_audio(
+pub fn trim_slient_duration_of_audio(
     audio_path: impl AsRef<Path>,
     timestamps: &[(u64, u64)], // (ms, ms)
     adaptive_threshold_factor: f32,
@@ -174,29 +204,46 @@ pub fn trim_start_slient_duration_of_audio(
             continue;
         }
 
-        let segmemt = &audio_samples[start_index..end_index];
+        let segment = &audio_samples[start_index..end_index];
 
         let vad = EnergyVAD::new(sample_rate)
-            .with_threshold(EnergyVAD::calculate_rms(segmemt) * adaptive_threshold_factor);
+            .with_threshold(EnergyVAD::calculate_rms(segment) * adaptive_threshold_factor);
 
-        let silent_offset = vad.detect_silent_offset_ms(segmemt);
+        let leading_silent_offset = vad.detect_leading_silent_duration_ms(segment);
+        let trailing_silent_duration = vad.detect_trailing_silent_duration_ms(segment);
 
-        // log::debug!("{index}: {silent_offset}");
+        // log::debug!("{index}: leading_silent={leading_silent_offset}, trailing_silent={trailing_silent_duration}");
 
-        if silent_offset == 0 {
-            output_timestamps.push((*start_ms, *end_ms));
+        // Calculate new start time after removing leading silence
+        let new_start_ms = if leading_silent_offset == 0 {
+            *start_ms
         } else {
-            let offset_ms = if silent_offset > vad.frame_size_ms {
-                start_ms + silent_offset - vad.frame_size_ms
+            let offset_ms = if leading_silent_offset > vad.frame_size_ms {
+                start_ms + leading_silent_offset - vad.frame_size_ms
             } else {
                 *start_ms
             };
+            offset_ms
+        };
 
-            if offset_ms >= *end_ms {
-                output_timestamps.push((*start_ms, *end_ms));
+        // Calculate new end time after removing trailing silence
+        let new_end_ms = if trailing_silent_duration == 0 {
+            *end_ms
+        } else {
+            let duration_ms = end_ms - start_ms;
+            let silent_offset_ms = if trailing_silent_duration > vad.frame_size_ms {
+                trailing_silent_duration - vad.frame_size_ms
             } else {
-                output_timestamps.push((offset_ms, *end_ms));
-            }
+                0
+            };
+            end_ms - silent_offset_ms.min(duration_ms)
+        };
+
+        // Ensure the modified timestamp is still valid
+        if new_start_ms >= new_end_ms {
+            output_timestamps.push((*start_ms, *end_ms));
+        } else {
+            output_timestamps.push((new_start_ms, new_end_ms));
         }
 
         let progress = (index + 1) * 100 / timestamps.len();
@@ -253,9 +300,9 @@ mod tests {
         Ok(())
     }
 
-    // cargo test test_trim_start_slient_duration_of_audio -- --no-capture
+    // cargo test test_trim_slient_duration_of_audio -- --no-capture
     #[test]
-    fn test_trim_start_slient_duration_of_audio() -> Result<()> {
+    fn test_trim_slient_duration_of_audio() -> Result<()> {
         let audio_path = "./examples/data/test-20.wav";
         let timestamps = vec![
             (0, 3_000),
@@ -266,7 +313,7 @@ mod tests {
             (14_500, 20_000),
         ];
 
-        let (output_timestamps, status) = trim_start_slient_duration_of_audio(
+        let (output_timestamps, status) = trim_slient_duration_of_audio(
             audio_path,
             &timestamps,
             0.01,
@@ -287,6 +334,33 @@ mod tests {
                 start_ms as f64 / 1000.0,
                 end_ms as f64 / 1000.0
             );
+        }
+
+        Ok(())
+    }
+
+    // cargo test test_trailing_silent_detection -- --no-capture
+    #[test]
+    fn test_trailing_silent_detection() -> Result<()> {
+        let audio_path = "./examples/data/test-20.wav";
+        let audio_data = wav::read_file(audio_path)?;
+
+        let vad = EnergyVAD::new(audio_data.config.sample_rate);
+
+        // Test with a sample segment that might have trailing silence
+        let segment_duration_ms = 5_000; // 5 seconds
+        let start_index = (audio_data.config.sample_rate as u64 * 10_000 / 1000) as usize; // start at 10s
+        let end_index =
+            start_index + (audio_data.config.sample_rate * segment_duration_ms / 1000) as usize;
+
+        if end_index < audio_data.samples.len() {
+            let segment = &audio_data.samples[start_index..end_index];
+            let leading_silent = vad.detect_leading_silent_duration_ms(segment);
+            let trailing_silent = vad.detect_trailing_silent_duration_ms(segment);
+
+            println!("Leading silent duration: {}ms", leading_silent);
+            println!("Trailing silent duration: {}ms", trailing_silent);
+            println!("Segment duration: {}ms", segment_duration_ms);
         }
 
         Ok(())

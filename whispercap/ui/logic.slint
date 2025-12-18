@@ -1,4 +1,24 @@
-import { Store,  SettingPreference, SettingModel, TabIndex, SettingDetailIndex, MobileSettingDetailIndex, PopupIndex, MobileTabIndex, SettingBackup, ProgressType, TranscribeEntry, ExportVideoSetting, SubtitleSetting, AiHandleSubtitleSetting, SubtitleEntry, ModelSource, ModelStatus, ModelEntry, SystemFontInfo } from "store.slint";
+import {
+    Store,
+    SettingPreference,
+    SettingModel,
+    TabIndex,
+    SettingDetailIndex,
+    MobileSettingDetailIndex,
+    PopupIndex,
+    MobileTabIndex,
+    SettingBackup,
+    ProgressType,
+    TranscribeEntry,
+    ExportVideoSetting,
+    SubtitleSetting,
+    AiHandleSubtitleSetting,
+    SubtitleEntry,
+    ModelSource,
+    ModelStatus,
+    ModelEntry,
+    SystemFontInfo,
+} from "store.slint";
 import { Theme } from "theme.slint";
 import { PopupActionEntry } from "base/popup-action.slint";
 import { TextListEntry } from "base/def.slint";
@@ -96,6 +116,7 @@ export global Logic {
     callback ai-translate-all-subtitles(setting: AiHandleSubtitleSetting);
     callback remove-all-translated-subtitles();
     callback show-replace-subtitles-content-dialog();
+    callback subtitles-to-lowercase();
     callback replace-subtitles-content(old-text: string, new-text: string);
     callback replace-subtitles-all-separator();
     callback traditional-to-simple-chinese();
@@ -108,6 +129,7 @@ export global Logic {
     callback merge-above-subtitle(index: int);
     callback insert-above-subtitle(index: int);
     callback insert-below-subtitle(index: int);
+    callback shift-subtitles-timestamp(index: int, shift_ms: string);
     callback remove-subtitle(index: int);
     callback save-subtitle(index: int, subtitle: SubtitleEntry);
     callback reject-subtitle-correction(index: int);

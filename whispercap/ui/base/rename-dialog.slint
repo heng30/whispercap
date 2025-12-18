@@ -12,16 +12,23 @@ export component RenameDialog inherits Dialog {
 
     callback rename(text: string);
 
-    init => {
-        line-input.focus();
-    }
-
     confirmed => {
         rename(root.text);
     }
 
     canceled => {
         self.escape();
+    }
+
+    Timer {
+        private property <bool> is-running: true;
+
+        interval: 200ms;
+        running: is-running;
+        triggered() => {
+            is-running = false;
+            line-input.focus();
+        }
     }
 
     VerticalLayout {

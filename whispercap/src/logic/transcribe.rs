@@ -46,7 +46,7 @@ use std::{
 use tokio::{sync::mpsc, task::AbortHandle};
 use transcribe::{
     SegmentCallbackData,
-    subtitle::{self, Subtitle},
+    subtitle::{self, Subtitle, ms_to_srt_timestamp, srt_timestamp_to_ms},
     whisper_lang::WhisperLang,
 };
 use uuid::Uuid;
@@ -158,6 +158,21 @@ pub fn init(ui: &AppWindow) {
         let ui = ui_weak.unwrap();
         global_store!(ui).set_edit_transcribe_sidebar_index(index);
         global_store!(ui).set_current_popup_index(PopupIndex::TranscribeRename);
+    });
+
+    let ui_weak = ui.as_weak();
+    global_logic!(ui).on_subtitles_to_lowercase(move || {
+        let ui = ui_weak.unwrap();
+        let entry = global_logic!(ui).invoke_current_transcribe_entry();
+        let entries = store_transcribe_subtitle_entries!(entry)
+            .iter()
+            .map(|mut item| {
+                item.original_text = item.original_text.to_lowercase().into();
+                item
+            })
+            .collect::<Vec<_>>();
+        store_transcribe_subtitle_entries!(entry).set_vec(entries);
+        update_db_entry(&ui, entry.into());
     });
 
     global_logic!(ui).on_gen_transcribe_sidebar_entries(move |_flag, entries| {
@@ -387,6 +402,11 @@ pub fn init(ui: &AppWindow) {
     let ui_weak = ui.as_weak();
     global_logic!(ui).on_merge_above_subtitle(move |index| {
         merge_above_subtitle(&ui_weak.unwrap(), index as usize);
+    });
+
+    let ui_weak = ui.as_weak();
+    global_logic!(ui).on_shift_subtitles_timestamp(move |index, shift_ms| {
+        shift_subtitles_timestamp(&ui_weak.unwrap(), index as usize, shift_ms);
     });
 
     let ui_weak = ui.as_weak();
@@ -2084,7 +2104,7 @@ fn optimize_subtitles_timestamp(ui: &AppWindow) {
 
     tokio::spawn(async move {
         let (ui_weak_duplicate, id_duplicate) = (ui_weak.clone(), id.clone());
-        match transcribe::vad::trim_start_slient_duration_of_audio(
+        match transcribe::vad::trim_slient_duration_of_audio(
             &audio_path,
             &timestamps,
             1.0,
@@ -2303,6 +2323,45 @@ fn merge_above_subtitle(ui: &AppWindow, index: usize) {
     store_transcribe_subtitle_entries!(entry).set_row_data(index - 1, prev_subtitle);
     store_transcribe_subtitle_entries!(entry).remove(index);
 
+    update_db_entry(&ui, entry.into());
+}
+
+fn shift_subtitles_timestamp(ui: &AppWindow, index: usize, shift_ms: SharedString) {
+    let Ok(shift_ms) = shift_ms.parse::<i32>() else {
+        toast_warn!(ui, format!("{shift_ms} is not a number"));
+        return;
+    };
+
+    let entry = global_logic!(ui).invoke_current_transcribe_entry();
+    let entries = store_transcribe_subtitle_entries!(entry)
+        .iter()
+        .enumerate()
+        .map(|(i, mut item)| {
+            if i < index {
+                item
+            } else {
+                if let Ok(ref st) = srt_timestamp_to_ms(&item.start_timestamp) {
+                    let new_st = if shift_ms >= 0 {
+                        *st + shift_ms as u64
+                    } else {
+                        *st - shift_ms.abs() as u64
+                    };
+                    item.start_timestamp = ms_to_srt_timestamp(new_st).into();
+                }
+
+                if let Ok(ref st) = srt_timestamp_to_ms(&item.end_timestamp) {
+                    let new_st = if shift_ms >= 0 {
+                        *st + shift_ms as u64
+                    } else {
+                        *st - shift_ms.abs() as u64
+                    };
+                    item.end_timestamp = ms_to_srt_timestamp(new_st).into();
+                }
+                item
+            }
+        })
+        .collect::<Vec<_>>();
+    store_transcribe_subtitle_entries!(entry).set_vec(entries);
     update_db_entry(&ui, entry.into());
 }
 

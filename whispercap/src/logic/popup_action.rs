@@ -1,5 +1,5 @@
 use crate::{
-    global_logic,
+    global_logic, global_store,
     logic::tr::tr,
     slint_generatedAppWindow::{AppWindow, ConfirmDialogSetting, PopupActionSetting},
 };
@@ -55,6 +55,9 @@ pub fn init(ui: &AppWindow) {
                 "show-replace-subtitles-content-dialog" => {
                     global_logic!(ui).invoke_show_replace_subtitles_content_dialog();
                 }
+                "subtitles-to-lowercase" => {
+                    global_logic!(ui).invoke_subtitles_to_lowercase();
+                }
                 "replace-subtitles-all-separator" => {
                     global_logic!(ui).invoke_replace_subtitles_all_separator();
                 }
@@ -88,6 +91,12 @@ pub fn init(ui: &AppWindow) {
                 "merge-above-subtitle" => {
                     let index = user_data.parse::<i32>().unwrap_or_default();
                     global_logic!(ui).invoke_merge_above_subtitle(index);
+                }
+                "show-shift-subtitles-timestamp" => {
+                    let index = user_data.parse::<i32>().unwrap_or_default();
+                    global_store!(ui).set_subtitles_shift_timestamp_index(index);
+                    global_logic!(ui)
+                        .invoke_switch_popup(crate::PopupIndex::SubtitlesShiftTimestamp);
                 }
                 "insert-above-subtitle" => {
                     let index = user_data.parse::<i32>().unwrap_or_default();

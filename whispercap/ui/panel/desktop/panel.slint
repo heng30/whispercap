@@ -1,12 +1,46 @@
-import { Theme, Store, TabIndex, SettingDetailIndex, SettingBackup, Logic, Util, Icons, PopupIndex } from "../def.slint";
-import { SettingDialog, AboutDialog, BackupDialog, HorizontalSettingIconsBar, HelpDialog, DonateDialog, VerticalSettingIconsBar } from "../setting/desktop.slint";
-import { Blanket, StatusBar, Divider, AboutSetting, ToolTip, ToolTipSetting, PopupAction, PopupActionSetting, ComponentPosition, IconBtn, ToastStatus, RenameDialog, ReplaceDialog } from "../../base/widgets.slint";
+import {
+    Theme,
+    Store,
+    TabIndex,
+    SettingDetailIndex,
+    SettingBackup,
+    Logic,
+    Util,
+    Icons,
+    PopupIndex,
+} from "../def.slint";
+import {
+    SettingDialog,
+    AboutDialog,
+    BackupDialog,
+    HorizontalSettingIconsBar,
+    HelpDialog,
+    DonateDialog,
+    VerticalSettingIconsBar,
+} from "../setting/desktop.slint";
+import {
+    Blanket,
+    StatusBar,
+    Divider,
+    AboutSetting,
+    ToolTip,
+    ToolTipSetting,
+    PopupAction,
+    PopupActionSetting,
+    ComponentPosition,
+    IconBtn,
+    ToastStatus,
+    RenameDialog,
+    ReplaceDialog,
+} from "../../base/widgets.slint";
 
 import { Home } from "home.slint";
 import { TranscribeSettingDialog } from "transcribe/setting-dialog.slint";
 import { ExportSubtitleDialog } from "transcribe/export-subtitle-dialog.slint";
 import { ExportVideoDialog } from "transcribe/export-video-dialog.slint";
-import { AiHandleSubtitleSettingDialog } from "transcribe/ai-handle-subtitle-setting-dialog.slint";
+import {
+    AiHandleSubtitleSettingDialog,
+} from "transcribe/ai-handle-subtitle-setting-dialog.slint";
 
 component HorizontalHomeIconsBar inherits Rectangle {
     width: hbox.preferred-width;
@@ -161,6 +195,7 @@ export component DesktopPanel inherits Rectangle {
     private property <bool> is-show-about-dialog: Store.current-popup-index == PopupIndex.About;
     private property <bool> is-show-donate-dialog: Store.current-popup-index == PopupIndex.Donate;
     private property <bool> is-show-transcribe-rename-dialog: Store.current-popup-index == PopupIndex.TranscribeRename;
+    private property <bool> is-show-subtitles-shift-timestamp-dialog: Store.current-popup-index == PopupIndex.SubtitlesShiftTimestamp;
     private property <bool> is-show-transcribe-setting-dialog: Store.current-popup-index == PopupIndex.TranscribeSetting;
     private property <bool> is-show-export-subtitle-dialog: Store.current-popup-index == PopupIndex.ExportSubtitle;
     private property <bool> is-show-export-video-dialog: Store.current-popup-index == PopupIndex.ExportVideo;
@@ -185,7 +220,7 @@ export component DesktopPanel inherits Rectangle {
         }
     }
 
-    if is-show-setting-dialog || is-show-about-dialog || is-show-help-dialog || is-show-donate-dialog || is-show-backup-dialog || is-show-transcribe-rename-dialog || is-show-transcribe-setting-dialog || is-show-export-subtitle-dialog || is-show-export-video-dialog || is-show-ai-handle-subtitle-setting-dialog || is-show-subtitles-replace-dialog: Blanket {
+    if is-show-setting-dialog || is-show-about-dialog || is-show-help-dialog || is-show-donate-dialog || is-show-backup-dialog || is-show-transcribe-rename-dialog || is-show-subtitles-shift-timestamp-dialog || is-show-transcribe-setting-dialog || is-show-export-subtitle-dialog || is-show-export-video-dialog || is-show-ai-handle-subtitle-setting-dialog || is-show-subtitles-replace-dialog: Blanket {
         clicked => {
             Logic.switch-popup(PopupIndex.None);
         }
@@ -201,6 +236,22 @@ export component DesktopPanel inherits Rectangle {
 
         rename(text) => {
             Logic.rename-transcribe-entry(Store.edit-transcribe-sidebar-index, text);
+        }
+    }
+
+    if is-show-subtitles-shift-timestamp-dialog: RenameDialog {
+        title: Logic.tr("Shift Timestamps (ms)");
+        width: Math.min(Theme.dialog-normal-width, root.width * 0.95);
+
+        escape => {
+            Logic.switch-popup(PopupIndex.None);
+        }
+
+        rename(text) => {
+            if (!text.is-empty) {
+                Logic.shift-subtitles-timestamp(Store.subtitles-shift-timestamp-index, text);
+            }
+            Logic.switch-popup(PopupIndex.None);
         }
     }
 

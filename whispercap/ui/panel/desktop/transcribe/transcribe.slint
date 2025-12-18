@@ -1,8 +1,35 @@
 import { ScrollView } from "std-widgets.slint";
 import { Theme, Icons } from "../../../theme.slint";
-import { TranscribeEntry, PopupIndex, ProgressType, SubtitleEntry, MediaType } from "../../../store.slint";
+import {
+    TranscribeEntry,
+    PopupIndex,
+    ProgressType,
+    SubtitleEntry,
+    MediaType,
+} from "../../../store.slint";
 import { Theme, Icons, Store, Util, Logic } from "../../def.slint";
-import { NoMessageImg, ConfirmBtn, ConfirmDialogSetting, CenterLayout, TxtEdit, Label, IconBtn, GainFocus, SwitchBtn, LineInput, TextBtn, ProgressBar, ElevatedBtn, Divider, ClickAndEditLabel, PopupActionSetting, PopupActionEntry, Skeleton, SkeletonType, CancelAndConfirmIconsBtn } from "../../../base/widgets.slint";
+import {
+    NoMessageImg,
+    ConfirmBtn,
+    ConfirmDialogSetting,
+    CenterLayout,
+    TxtEdit,
+    Label,
+    IconBtn,
+    GainFocus,
+    SwitchBtn,
+    LineInput,
+    TextBtn,
+    ProgressBar,
+    ElevatedBtn,
+    Divider,
+    ClickAndEditLabel,
+    PopupActionSetting,
+    PopupActionEntry,
+    Skeleton,
+    SkeletonType,
+    CancelAndConfirmIconsBtn,
+} from "../../../base/widgets.slint";
 
 component HeadBar inherits HorizontalLayout {
     in-out property <bool> is-progressing: progress-type != ProgressType.None && !is-progress-finished;
@@ -63,6 +90,11 @@ component HeadBar inherits HorizontalLayout {
             action: "show-replace-subtitles-content-dialog",
         },
         {
+            icon: Icons.to-lowercase-light,
+            text: Logic.tr("lowercase"),
+            action: "subtitles-to-lowercase",
+        },
+        {
             icon: Icons.traditional-to-simple-chinese,
             text: Logic.tr("traditional to simple chinese"),
             action: "traditional-to-simple-chinese",
@@ -101,6 +133,11 @@ component HeadBar inherits HorizontalLayout {
             icon: Icons.replace,
             text: Logic.tr("replace text"),
             action: "show-replace-subtitles-content-dialog",
+        },
+        {
+            icon: Icons.to-lowercase-light,
+            text: Logic.tr("lowercase"),
+            action: "subtitles-to-lowercase",
         },
         {
             icon: Icons.traditional-to-simple-chinese,
@@ -333,6 +370,12 @@ component BodyItem inherits Rectangle {
                             update-unsaved-status();
                         }
 
+                        accepted(text) => {
+                            is-unsaved = false;
+                            root.is-edit = false;
+                            Logic.save-subtitle(index, entry-cache);
+                        }
+
                         clicked => {
                             root.is-edit = true;
                         }
@@ -434,6 +477,12 @@ component BodyItem inherits Rectangle {
                                         icon: Icons.merge-above-light,
                                         text: Logic.tr("Merge Above"),
                                         action: "merge-above-subtitle",
+                                        user-data: index,
+                                    },
+                                    {
+                                        icon: Icons.shift-light,
+                                        text: Logic.tr("Shift timestamp"),
+                                        action: "show-shift-subtitles-timestamp",
                                         user-data: index,
                                     },
                                     { },

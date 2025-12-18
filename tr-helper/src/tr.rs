@@ -336,6 +336,9 @@ fn cn() -> &'static HashMap<&'static str, &'static str> {
             ("Refresh successfully", "刷新成功"),
             ("refresh", "刷新"),
             ("split subtitle failed", "分割字幕失败"),
+            ("Shift Timestamps (ms)", "平移时间戳（毫秒）"),
+            ("Shift timestamp", "平移时间戳"),
+            ("lowercase", "转成小写"),
         ])
     })
 }
