@@ -29,6 +29,7 @@ import {
     Skeleton,
     SkeletonType,
     CancelAndConfirmIconsBtn,
+    SoundWaveForm,
 } from "../../../base/widgets.slint";
 
 component HeadBar inherits HorizontalLayout {
@@ -373,6 +374,7 @@ component BodyItem inherits Rectangle {
                         accepted(text) => {
                             is-unsaved = false;
                             root.is-edit = false;
+                            Logic.update-current-sound-wave(index, 250);
                             Logic.save-subtitle(index, entry-cache);
                         }
 
@@ -404,8 +406,47 @@ component BodyItem inherits Rectangle {
                             update-unsaved-status();
                         }
 
+                        accepted(text) => {
+                            is-unsaved = false;
+                            root.is-edit = false;
+                            Logic.update-current-sound-wave(index, 250);
+                            Logic.save-subtitle(index, entry-cache);
+                        }
+
                         clicked => {
                             root.is-edit = true;
+                        }
+                    }
+
+                    HorizontalLayout {
+                        padding-left: Theme.padding * 4;
+
+                        SoundWaveForm {
+                            width: 250px;
+                            height: Theme.icon-size * 1.5;
+                            control-handle-size: Theme.icon-size * Theme.golden-ratio;
+                            amplitude-scale: max(0, entry.sound-wave-amplitude);
+                            wave-data: entry.sound-data;
+                            disable-amplitude: true;
+                            is-mono: true;
+
+                            moved(percent) => {
+                                Logic.sound-wave-moved(index, percent)
+                            }
+
+                            zoom-changed(level) => {
+                                Logic.sound-wave-zoom-changed(index, level);
+                            }
+
+                            start-position-changed(pos) => {
+                                self.reset-control-handle-pos();
+                                Logic.sound-wave-start-position-changed(index, pos);
+                            }
+
+                            end-position-changed(pos) => {
+                                self.reset-control-handle-pos();
+                                Logic.sound-wave-end-position-changed(index, pos);
+                            }
                         }
                     }
                 }
@@ -430,6 +471,7 @@ component BodyItem inherits Rectangle {
                             confirmed => {
                                 is-unsaved = false;
                                 root.is-edit = false;
+                                Logic.update-current-sound-wave(index, 250);
                                 Logic.save-subtitle(index, entry-cache);
                             }
                         }

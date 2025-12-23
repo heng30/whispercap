@@ -53,6 +53,7 @@ use uuid::Uuid;
 
 static MEDIA_INC_NUM: AtomicU64 = AtomicU64::new(0);
 static CACHE: Lazy<Mutex<Cache>> = Lazy::new(|| Mutex::new(Cache::default()));
+const MAX_SOUND_WAVE_FORM_SIZE: i32 = 250;
 
 #[macro_export]
 macro_rules! store_system_font_infos {
@@ -577,6 +578,38 @@ pub fn init(ui: &AppWindow) {
         }
     });
 
+    let ui_weak = ui.as_weak();
+    global_logic!(ui).on_init_current_sound_waves(move |max_samples| {
+        if max_samples > 0 {
+            init_current_audio_smaples(&ui_weak.unwrap(), max_samples as u64);
+        }
+    });
+
+    let ui_weak = ui.as_weak();
+    global_logic!(ui).on_update_current_sound_wave(move |index, max_samples| {
+        update_current_sound_wave(&ui_weak.unwrap(), index, max_samples);
+    });
+
+    let ui_weak = ui.as_weak();
+    global_logic!(ui).on_sound_wave_zoom_changed(move |index, level| {
+        sound_wave_zoom_changed(&ui_weak.unwrap(), index, level);
+    });
+
+    let ui_weak = ui.as_weak();
+    global_logic!(ui).on_sound_wave_moved(move |index, percent| {
+        sound_wave_moved(&ui_weak.unwrap(), index, percent);
+    });
+
+    let ui_weak = ui.as_weak();
+    global_logic!(ui).on_sound_wave_start_position_changed(move |index, pos| {
+        sound_wave_start_position_changed(&ui_weak.unwrap(), index, pos);
+    });
+
+    let ui_weak = ui.as_weak();
+    global_logic!(ui).on_sound_wave_end_position_changed(move |index, pos| {
+        sound_wave_end_position_changed(&ui_weak.unwrap(), index, pos);
+    });
+
     // END
 }
 
@@ -992,6 +1025,7 @@ fn switch_sidebar_entry(ui: &AppWindow, old_index: i32, new_index: i32) {
     }
 
     global_store!(ui).set_selected_transcribe_sidebar_index(new_index as i32);
+    global_logic!(ui).invoke_init_current_sound_waves(MAX_SOUND_WAVE_FORM_SIZE);
 }
 
 fn update_video_player_setting_when_switch(
@@ -1532,6 +1566,7 @@ fn refresh_subtitles(ui: &AppWindow) {
         .collect::<Vec<UISubtitleEntry>>();
 
     store_transcribe_subtitle_entries!(entry).set_vec(subtitles);
+    global_logic!(ui).invoke_init_current_sound_waves(MAX_SOUND_WAVE_FORM_SIZE);
     toast_success!(ui, tr("Refresh successfully"));
 }
 
@@ -2065,27 +2100,8 @@ fn remove_all_subtitles(ui: &AppWindow) {
 fn optimize_subtitles_timestamp(ui: &AppWindow) {
     let entry = global_logic!(ui).invoke_current_transcribe_entry();
     let id = entry.id.clone().to_string();
-    let mut timestamps = vec![];
 
-    for item in store_transcribe_subtitle_entries!(entry).iter() {
-        let start_timestamp = transcribe::subtitle::srt_timestamp_to_ms(&item.start_timestamp);
-        let end_timestamp = transcribe::subtitle::srt_timestamp_to_ms(&item.end_timestamp);
-
-        if start_timestamp.is_err() || end_timestamp.is_err() {
-            toast_warn!(
-                ui,
-                format!(
-                    "{}: {} -> {}",
-                    tr("invalid timestamp"),
-                    item.start_timestamp,
-                    item.end_timestamp
-                )
-            );
-        }
-
-        timestamps.push((start_timestamp.unwrap(), end_timestamp.unwrap()));
-    }
-
+    let timestamps = get_current_timestamps(ui);
     if timestamps.is_empty() {
         return;
     }
@@ -2186,6 +2202,9 @@ fn optimize_subtitles_timestamp(ui: &AppWindow) {
                                 Some(ProgressType::OptimizeTimestampFinished),
                                 1.0,
                             );
+
+                            global_logic!(ui)
+                                .invoke_init_current_sound_waves(MAX_SOUND_WAVE_FORM_SIZE);
                         }
                         transcribe::ProgressStatus::Cancelled => {
                             update_progress(&ui, id.clone(), Some(ProgressType::None), 0.0)
@@ -2277,6 +2296,9 @@ fn split_subtitle(ui: &AppWindow, index: usize) {
         store_transcribe_subtitle_entries!(entry).insert(index + 1, next_subtitle);
     }
 
+    global_logic!(ui).invoke_update_current_sound_wave(index as i32, MAX_SOUND_WAVE_FORM_SIZE);
+    global_logic!(ui).invoke_update_current_sound_wave(index as i32 + 1, MAX_SOUND_WAVE_FORM_SIZE);
+
     update_db_entry(&ui, entry.into());
 }
 
@@ -2322,6 +2344,7 @@ fn merge_above_subtitle(ui: &AppWindow, index: usize) {
 
     store_transcribe_subtitle_entries!(entry).set_row_data(index - 1, prev_subtitle);
     store_transcribe_subtitle_entries!(entry).remove(index);
+    global_logic!(ui).invoke_update_current_sound_wave(index as i32 - 1, MAX_SOUND_WAVE_FORM_SIZE);
 
     update_db_entry(&ui, entry.into());
 }
@@ -2361,7 +2384,9 @@ fn shift_subtitles_timestamp(ui: &AppWindow, index: usize, shift_ms: SharedStrin
             }
         })
         .collect::<Vec<_>>();
+
     store_transcribe_subtitle_entries!(entry).set_vec(entries);
+    global_logic!(ui).invoke_init_current_sound_waves(MAX_SOUND_WAVE_FORM_SIZE);
     update_db_entry(&ui, entry.into());
 }
 
@@ -3018,6 +3043,286 @@ fn to_subtitles(ui: &AppWindow) -> Option<Vec<Subtitle>> {
     }
 
     Some(items)
+}
+
+fn get_current_timestamps(ui: &AppWindow) -> Vec<(u64, u64)> {
+    let entry = global_logic!(ui).invoke_current_transcribe_entry();
+    let mut timestamps = vec![];
+
+    for item in store_transcribe_subtitle_entries!(entry).iter() {
+        let start_timestamp = transcribe::subtitle::srt_timestamp_to_ms(&item.start_timestamp);
+        let end_timestamp = transcribe::subtitle::srt_timestamp_to_ms(&item.end_timestamp);
+
+        if start_timestamp.is_err() || end_timestamp.is_err() {
+            toast_warn!(
+                ui,
+                format!(
+                    "{}: {} -> {}",
+                    tr("invalid timestamp"),
+                    item.start_timestamp,
+                    item.end_timestamp
+                )
+            );
+
+            break;
+        }
+
+        timestamps.push((start_timestamp.unwrap(), end_timestamp.unwrap()));
+    }
+
+    timestamps
+}
+
+fn init_current_audio_smaples(ui: &AppWindow, max_samples: u64) {
+    let timestamps = get_current_timestamps(ui);
+    if timestamps.is_empty() {
+        return;
+    }
+
+    let ui_weak = ui.as_weak();
+    let entry = global_logic!(ui).invoke_current_transcribe_entry();
+    let id = entry.id.clone().to_string();
+    let audio_path = config::cache_dir().join(format!("{id}.wav"));
+
+    tokio::spawn(async move {
+        match transcribe::vad::get_audio_samples(audio_path, &timestamps, max_samples) {
+            Ok(samples) => {
+                _ = ui_weak.upgrade_in_event_loop(move |ui| {
+                    let entry = global_logic!(ui).invoke_current_transcribe_entry();
+
+                    let entries = store_transcribe_subtitle_entries!(entry)
+                        .iter()
+                        .enumerate()
+                        .map(|(index, mut item)| {
+                            if index < samples.len() {
+                                let amplitude = if let Some(max_sample_value) =
+                                    samples[index].iter().max_by(|a, b| {
+                                        a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)
+                                    }) {
+                                    1.0 / max_sample_value
+                                } else {
+                                    1.0
+                                };
+
+                                // log::info!("amplitude: {amplitude}");
+
+                                item.sound_wave_amplitude = amplitude;
+                                item.sound_data =
+                                    ModelRc::new(VecModel::from_slice(&samples[index]));
+                            }
+                            item
+                        })
+                        .collect::<Vec<_>>();
+                    store_transcribe_subtitle_entries!(entry).set_vec(entries);
+                });
+            }
+            Err(e) => {
+                async_toast_warn(ui_weak, format!("Get audio sample failed: {e}"));
+            }
+        }
+    });
+}
+
+fn update_current_sound_wave(ui: &AppWindow, index: i32, max_samples: i32) {
+    let index = index as usize;
+    let entry = global_logic!(ui).invoke_current_transcribe_entry();
+    let subtitles_len = store_transcribe_subtitle_entries!(entry).row_count();
+
+    if index >= subtitles_len || subtitles_len == 0 {
+        return;
+    }
+
+    let subtitle = store_transcribe_subtitle_entries!(entry)
+        .row_data(index)
+        .unwrap();
+
+    let start_timestamp = transcribe::subtitle::srt_timestamp_to_ms(&subtitle.start_timestamp);
+    let end_timestamp = transcribe::subtitle::srt_timestamp_to_ms(&subtitle.end_timestamp);
+    if start_timestamp.is_err() || end_timestamp.is_err() {
+        return;
+    }
+
+    let ui_weak = ui.as_weak();
+    let audio_path = config::cache_dir().join(format!("{}.wav", entry.id));
+
+    tokio::spawn(async move {
+        let timestamps = [(start_timestamp.unwrap(), end_timestamp.unwrap())];
+
+        match transcribe::vad::get_audio_samples(audio_path, &timestamps, max_samples.max(1) as u64)
+        {
+            Ok(samples) => {
+                if samples.is_empty() {
+                    return;
+                }
+
+                _ = ui_weak.upgrade_in_event_loop(move |ui| {
+                    let entry = global_logic!(ui).invoke_current_transcribe_entry();
+                    let subtitles_len = store_transcribe_subtitle_entries!(entry).row_count();
+
+                    if index >= subtitles_len || subtitles_len == 0 {
+                        return;
+                    }
+
+                    let mut subtitle = store_transcribe_subtitle_entries!(entry)
+                        .row_data(index)
+                        .unwrap();
+
+                    let amplitude = if let Some(max_sample_value) = samples[0]
+                        .iter()
+                        .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+                    {
+                        1.0 / max_sample_value
+                    } else {
+                        1.0
+                    };
+
+                    subtitle.sound_wave_amplitude = amplitude;
+                    subtitle.sound_data = ModelRc::new(VecModel::from_slice(&samples[0]));
+                    store_transcribe_subtitle_entries!(entry).set_row_data(index, subtitle);
+                });
+            }
+            Err(e) => {
+                async_toast_warn(ui_weak, format!("get audio sample failed: {e}"));
+            }
+        }
+    });
+}
+
+fn sound_wave_zoom_changed(ui: &AppWindow, index: i32, level: f32) {
+    let index = index as usize;
+    let entry = global_logic!(ui).invoke_current_transcribe_entry();
+    let subtitles_len = store_transcribe_subtitle_entries!(entry).row_count();
+
+    if index >= subtitles_len || subtitles_len == 0 {
+        return;
+    }
+
+    let mut subtitle = store_transcribe_subtitle_entries!(entry)
+        .row_data(index)
+        .unwrap();
+
+    let start_timestamp = transcribe::subtitle::srt_timestamp_to_ms(&subtitle.start_timestamp);
+    let end_timestamp = transcribe::subtitle::srt_timestamp_to_ms(&subtitle.end_timestamp);
+    if start_timestamp.is_err() || end_timestamp.is_err() {
+        return;
+    }
+
+    let start_timestamp = start_timestamp.unwrap();
+    let end_timestamp = end_timestamp.unwrap();
+
+    let end_timestamp = if level <= 0.0 {
+        start_timestamp
+    } else {
+        let duration = ((end_timestamp - start_timestamp) as f32 / level) as u64;
+        if duration == 0 {
+            start_timestamp + 1000
+        } else {
+            start_timestamp + duration
+        }
+    };
+
+    subtitle.end_timestamp = transcribe::subtitle::ms_to_srt_timestamp(end_timestamp).into();
+    store_transcribe_subtitle_entries!(entry).set_row_data(index, subtitle);
+
+    global_logic!(ui).invoke_update_current_sound_wave(index as i32, MAX_SOUND_WAVE_FORM_SIZE);
+}
+
+fn sound_wave_moved(ui: &AppWindow, index: i32, percent: f32) {
+    if percent == 0.0 {
+        return;
+    }
+
+    let index = index as usize;
+    let entry = global_logic!(ui).invoke_current_transcribe_entry();
+    let subtitles_len = store_transcribe_subtitle_entries!(entry).row_count();
+
+    if index >= subtitles_len || subtitles_len == 0 {
+        return;
+    }
+
+    let mut subtitle = store_transcribe_subtitle_entries!(entry)
+        .row_data(index)
+        .unwrap();
+
+    let start_timestamp = transcribe::subtitle::srt_timestamp_to_ms(&subtitle.start_timestamp);
+    let end_timestamp = transcribe::subtitle::srt_timestamp_to_ms(&subtitle.end_timestamp);
+    if start_timestamp.is_err() || end_timestamp.is_err() {
+        return;
+    }
+
+    let mut start_timestamp = start_timestamp.unwrap() as i64;
+    let mut end_timestamp = end_timestamp.unwrap() as i64;
+    let duration = ((end_timestamp - start_timestamp) as f32 * percent) as i64;
+
+    start_timestamp = (start_timestamp + duration).max(0);
+    end_timestamp = (end_timestamp + duration).max(0);
+
+    subtitle.start_timestamp =
+        transcribe::subtitle::ms_to_srt_timestamp(start_timestamp as u64).into();
+    subtitle.end_timestamp = transcribe::subtitle::ms_to_srt_timestamp(end_timestamp as u64).into();
+
+    store_transcribe_subtitle_entries!(entry).set_row_data(index, subtitle);
+    global_logic!(ui).invoke_update_current_sound_wave(index as i32, MAX_SOUND_WAVE_FORM_SIZE);
+}
+
+fn sound_wave_start_position_changed(ui: &AppWindow, index: i32, pos: f32) {
+    let index = index as usize;
+    let entry = global_logic!(ui).invoke_current_transcribe_entry();
+    let subtitles_len = store_transcribe_subtitle_entries!(entry).row_count();
+
+    if index >= subtitles_len || subtitles_len == 0 {
+        return;
+    }
+
+    let mut subtitle = store_transcribe_subtitle_entries!(entry)
+        .row_data(index)
+        .unwrap();
+
+    let start_timestamp = transcribe::subtitle::srt_timestamp_to_ms(&subtitle.start_timestamp);
+    let end_timestamp = transcribe::subtitle::srt_timestamp_to_ms(&subtitle.end_timestamp);
+    if start_timestamp.is_err() || end_timestamp.is_err() {
+        return;
+    }
+
+    let start_timestamp = start_timestamp.unwrap();
+    let end_timestamp = end_timestamp.unwrap();
+    let duration = (end_timestamp - start_timestamp) as f32 * pos;
+    let start_timestamp = start_timestamp + duration as u64;
+
+    subtitle.start_timestamp = transcribe::subtitle::ms_to_srt_timestamp(start_timestamp).into();
+    store_transcribe_subtitle_entries!(entry).set_row_data(index, subtitle);
+
+    global_logic!(ui).invoke_update_current_sound_wave(index as i32, MAX_SOUND_WAVE_FORM_SIZE);
+}
+
+fn sound_wave_end_position_changed(ui: &AppWindow, index: i32, pos: f32) {
+    let index = index as usize;
+    let entry = global_logic!(ui).invoke_current_transcribe_entry();
+    let subtitles_len = store_transcribe_subtitle_entries!(entry).row_count();
+
+    if index >= subtitles_len || subtitles_len == 0 {
+        return;
+    }
+
+    let mut subtitle = store_transcribe_subtitle_entries!(entry)
+        .row_data(index)
+        .unwrap();
+
+    let start_timestamp = transcribe::subtitle::srt_timestamp_to_ms(&subtitle.start_timestamp);
+    let end_timestamp = transcribe::subtitle::srt_timestamp_to_ms(&subtitle.end_timestamp);
+    if start_timestamp.is_err() || end_timestamp.is_err() {
+        return;
+    }
+
+    let start_timestamp = start_timestamp.unwrap();
+    let end_timestamp = end_timestamp.unwrap();
+    let duration = (end_timestamp - start_timestamp) as f32 * pos;
+    let end_timestamp = start_timestamp + duration as u64;
+
+    subtitle.end_timestamp = transcribe::subtitle::ms_to_srt_timestamp(end_timestamp).into();
+    store_transcribe_subtitle_entries!(entry).set_row_data(index, subtitle);
+
+    global_logic!(ui).invoke_update_current_sound_wave(index as i32, MAX_SOUND_WAVE_FORM_SIZE);
 }
 
 struct Cache {

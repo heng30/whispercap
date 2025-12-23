@@ -174,6 +174,13 @@ export global Logic {
     callback cancel-download-model(index: int);
     callback remove-model(index: int);
 
+    callback init-current-sound-waves(max-sample: int);
+    callback update-current-sound-wave(index: int, max-samples: int);
+    callback sound-wave-zoom-changed(index: int, level: float);
+    callback sound-wave-moved(index: int, percent: float);
+    callback sound-wave-start-position-changed(index: int, pos: float);
+    callback sound-wave-end-position-changed(index: int, pos: float);
+
     pure callback system-font-names(infos: [SystemFontInfo], _flag: int) -> [string];
     pure callback system-font-family(name: string, infos: [SystemFontInfo], _flag1: int) -> string;
 

@@ -83,6 +83,7 @@ impl From<SubtitleEntry> for UISubtitleEntry {
             end_timestamp: entry.end_timestamp.into(),
             original_text: entry.original_text.into(),
             translation_text: entry.translation_text.into(),
+            sound_data: ModelRc::new(VecModel::from_slice(&[])),
             ..Default::default()
         }
     }

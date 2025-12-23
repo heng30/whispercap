@@ -275,6 +275,56 @@ pub fn estimate_rms_for_duration(
     Ok(EnergyVAD::calculate_rms(samples_to_process))
 }
 
+pub fn get_audio_samples(
+    audio_path: impl AsRef<Path>,
+    timestamps: &[(u64, u64)], // (ms, ms)
+    max_samples: u64,
+) -> Result<Vec<Vec<f32>>> {
+    let audio_data = wav::read_file(&audio_path)?;
+
+    let audio_samples = if !audio_data.is_whisper_compatible() {
+        if audio_data.config.channels > 1 {
+            audio_data.to_mono().samples
+        } else {
+            audio_data.samples.clone()
+        }
+    } else {
+        audio_data.samples.clone()
+    };
+
+    let sample_rate = audio_data.config.sample_rate;
+    let total_indices = audio_samples.len();
+    let mut result = Vec::new();
+
+    for (start_ms, end_ms) in timestamps.iter() {
+        let start_index = ((sample_rate as u64 * start_ms) as f64 / 1000.0) as usize;
+        let end_index =
+            (((sample_rate as u64 * end_ms) as f64 / 1000.0) as usize).min(total_indices);
+
+        if start_index >= end_index {
+            result.push(Vec::new());
+            continue;
+        }
+
+        let segment = &audio_samples[start_index..end_index];
+
+        let samples = if segment.len() <= max_samples as usize {
+            segment.to_vec()
+        } else {
+            // Downsample by averaging blocks
+            let chunk_size = (segment.len() as f64 / max_samples as f64).ceil() as usize;
+            segment
+                .chunks(chunk_size)
+                .map(|chunk| chunk.iter().sum::<f32>() / chunk.len() as f32)
+                .collect()
+        };
+
+        result.push(samples);
+    }
+
+    Ok(result)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
