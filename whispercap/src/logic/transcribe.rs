@@ -396,6 +396,11 @@ pub fn init(ui: &AppWindow) {
     });
 
     let ui_weak = ui.as_weak();
+    global_logic!(ui).on_adjust_overlap_timestamp(move || {
+        adjust_overlap_timestamp(&ui_weak.unwrap());
+    });
+
+    let ui_weak = ui.as_weak();
     global_logic!(ui).on_split_subtitle(move |index| {
         split_subtitle(&ui_weak.unwrap(), index as usize);
     });
@@ -1360,7 +1365,10 @@ async fn transcribe(
         update_progress(&ui, id_duplicate, Some(ProgressType::Transcribe), 0.0);
     });
 
-    let config = transcribe::whisper::WhisperConfig::new(model_path).with_language(lang);
+    let config = transcribe::whisper::WhisperConfig::new(model_path)
+        .with_language(lang)
+        .with_chunk_length_ms(60000) // 60-second chunks to avoid timestamp drift
+        .with_chunk_overlap_ms(1000); // 1-second overlap between chunks
 
     let (ui_progress, ui_segement) = (ui_weak.clone(), ui_weak.clone());
     match transcribe::whisper::transcribe_file(
@@ -1413,6 +1421,8 @@ async fn transcribe(
 
                 let entry = global_logic!(ui).invoke_current_transcribe_entry();
                 update_db_entry(&ui, entry.into());
+
+                global_logic!(ui).invoke_init_current_sound_waves(MAX_SOUND_WAVE_FORM_SIZE);
             });
         }
         Err(e) => {
@@ -2123,7 +2133,7 @@ fn optimize_subtitles_timestamp(ui: &AppWindow) {
         match transcribe::vad::trim_slient_duration_of_audio(
             &audio_path,
             &timestamps,
-            1.0,
+            0.5,
             get_progress_cancel_signal(),
             move |v| {
                 let (ui_weak, id_duplicate) = (ui_weak_duplicate.clone(), id_duplicate.clone());
@@ -2241,6 +2251,39 @@ fn recover_subtitles_timestamp(ui: &AppWindow) {
         .collect::<Vec<UISubtitleEntry>>();
 
     store_transcribe_subtitle_entries!(entry).set_vec(subtitles);
+    update_db_entry(&ui, entry.into());
+}
+
+fn adjust_overlap_timestamp(ui: &AppWindow) {
+    let entry = global_logic!(ui).invoke_current_transcribe_entry();
+    let total = store_transcribe_subtitle_entries!(entry).row_count();
+
+    for index in 0..total {
+        let item = store_transcribe_subtitle_entries!(entry)
+            .row_data(index)
+            .unwrap();
+
+        if index == total - 1 {
+            break;
+        }
+
+        let mut next_item = store_transcribe_subtitle_entries!(entry)
+            .row_data(index + 1)
+            .unwrap();
+
+        let end_timestamp_ms = transcribe::subtitle::srt_timestamp_to_ms(&item.end_timestamp);
+        let next_start_timestamp_ms =
+            transcribe::subtitle::srt_timestamp_to_ms(&next_item.start_timestamp);
+
+        if let Ok(et) = end_timestamp_ms
+            && let Ok(next_st) = next_start_timestamp_ms
+            && et > next_st
+        {
+            next_item.start_timestamp = transcribe::subtitle::ms_to_srt_timestamp(et).into();
+            store_transcribe_subtitle_entries!(entry).set_row_data(index + 1, next_item);
+        }
+    }
+
     update_db_entry(&ui, entry.into());
 }
 

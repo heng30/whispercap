@@ -18,6 +18,8 @@ This is a desktop application that uses the Whisper model to transcribe videos o
 - AI-assisted subtitle correction
 - Play audio and video to assist in subtitle correction
 - Export subtitles and video
+- Adjust timestamps for audio waveform images
+- Transcribe in chunks to prevent severe timestamp drift in long videos
 
 ### How to build?
 - Install `Rust` and `Cargo`

@@ -1,2 +1,6 @@
 /examples/models
 /examples/tmp
+/target
+/.claude
+
+.mcp.json

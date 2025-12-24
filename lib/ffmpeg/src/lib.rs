@@ -1,4 +1,4 @@
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{Context, Result, anyhow, bail};
 use ffmpeg_sidecar::{
     command::FfmpegCommand,
     event::{
@@ -17,8 +17,8 @@ use std::fmt;
 use std::{
     path::{Path, PathBuf},
     sync::{
-        atomic::{AtomicBool, Ordering},
         Arc,
+        atomic::{AtomicBool, Ordering},
     },
 };
 
@@ -270,6 +270,7 @@ pub fn audio_metadata(path: impl AsRef<str>) -> Result<AudioMetadata> {
         .with_context(|| format!("Can't get {} metadata", path.as_ref()))?;
 
     let mut metadata = AudioMetadata::default();
+
     ffmpeg_runner.iter()?.for_each(|e| match e {
         FfmpegEvent::ParsedDuration(FfmpegDuration { duration, .. }) => {
             metadata.duration = duration;
@@ -290,6 +291,8 @@ pub fn audio_metadata(path: impl AsRef<str>) -> Result<AudioMetadata> {
         _ => {}
     });
 
+    _ = ffmpeg_runner.kill();
+    _ = ffmpeg_runner.wait();
     Ok(metadata)
 }
 
@@ -342,6 +345,8 @@ pub fn video_metadata(path: impl AsRef<str>) -> Result<VideoMetadata> {
         _ => {}
     });
 
+    _ = ffmpeg_runner.kill();
+    _ = ffmpeg_runner.wait();
     Ok(metadata)
 }
 
@@ -397,20 +402,22 @@ pub fn convert_to_audio(
         "-filter:a aformat=sample_fmts=s16:sample_rates=16000"
     };
 
-    let iter = FfmpegCommand::new()
+    let mut process = FfmpegCommand::new()
         .input(&input)
         .args(arg_string.split(' '))
         .overwrite()
         .output(output.as_ref().display().to_string())
         .print_command()
         .spawn()
-        .with_context(|| format!("ffmpeg spawn child process for converting {input} failed"))?
+        .with_context(|| format!("ffmpeg spawn child process for converting {input} failed"))?;
+
+    let iter = process
         .iter()
         .with_context(|| format!("ffmpeg iter for converting {input} failed"))?;
 
     for event in iter.into_iter() {
         if cancel.load(Ordering::Relaxed) {
-            return Ok(());
+            break;
         }
 
         match event {
@@ -429,6 +436,9 @@ pub fn convert_to_audio(
             _ => (),
         }
     }
+
+    _ = process.kill();
+    _ = process.wait();
 
     Ok(())
 }
@@ -504,30 +514,24 @@ pub fn video_frames_iter(
         _ => cmd,
     };
 
-    let mut child_process = cmd
+    let mut process = cmd
         .rawvideo()
         .overwrite()
         .print_command()
         .spawn()
         .with_context(|| format!("ffmpeg spawn child process for video frames {path} failed"))?;
 
-    let iter = child_process
+    let sleeper = SpinSleeper::default();
+    let start_time = std::time::Instant::now();
+
+    let iter = process
         .iter()
         .with_context(|| format!("ffmpeg iter for video frames {path} failed"))?
         .filter_frames();
 
-    let sleeper = SpinSleeper::default();
-    let start_time = std::time::Instant::now();
-
     for (index, frame) in iter.into_iter().enumerate() {
         if cancel.load(Ordering::Relaxed) {
-            if let Err(e) = child_process.kill() {
-                warn!("Failed to kill ffmpeg process after cancelling. {}", e);
-            } else {
-                info!("Exit ffmpeg child process after cancelling");
-            }
-
-            return Ok(VideoExitStatus::Stop);
+            break;
         }
 
         match frame_to_image(&frame) {
@@ -538,7 +542,6 @@ pub fn video_frames_iter(
             }
         }
 
-        // sleep for next frame
         if let Some(interval) = interval_ms {
             let target_time = start_time
                 + std::time::Duration::from_millis((interval * (index as u64 + 1) as f64) as u64);
@@ -546,15 +549,15 @@ pub fn video_frames_iter(
         }
     }
 
-    if let Err(e) = child_process.kill() {
-        warn!(
-            "Failed to kill ffmpeg process after finishing frame iteration: {}",
-            e
-        );
-    } else {
-        info!("Exit ffmpeg child process after finishing frame iteration");
+    _ = process.kill();
+    _ = process.wait();
+
+    if cancel.load(Ordering::Relaxed) {
+        info!("Exit ffmpeg child process after cancelling");
+        return Ok(VideoExitStatus::Stop);
     }
 
+    info!("Exit ffmpeg child process after finishing frame iteration");
     Ok(VideoExitStatus::Finished)
 }
 
@@ -600,14 +603,16 @@ pub fn video_screenshots(path: impl AsRef<Path>, count: u32) -> Result<Vec<RgbIm
     for i in 0..count {
         let timestamp = i as f64 * interval;
 
-        let frame = FfmpegCommand::new()
+        let mut process = FfmpegCommand::new()
             .input(&path)
             .args(&["-ss", &timestamp.to_string(), "-vframes", "1"])
             .rawvideo()
             .overwrite()
             .print_command()
             .spawn()
-            .with_context(|| format!("ffmpeg spawn for screenshot at {}s failed", timestamp))?
+            .with_context(|| format!("ffmpeg spawn for screenshot at {}s failed", timestamp))?;
+
+        let frame = process
             .iter()
             .with_context(|| format!("ffmpeg iter for screenshot at {}s failed", timestamp))?
             .filter_frames()
@@ -616,6 +621,9 @@ pub fn video_screenshots(path: impl AsRef<Path>, count: u32) -> Result<Vec<RgbIm
 
         let img = frame_to_image(&frame)?;
         screenshots.push(img);
+
+        _ = process.kill();
+        _ = process.wait();
     }
 
     Ok(screenshots)
@@ -632,7 +640,7 @@ pub fn adjust_normalized_voice(
     let input_path = input_path.as_ref().to_string_lossy();
 
     // I=-16：目标响度（-16 LUFS是广播常用标准） LRA=11：动态范围控制 TP=-1.5：最大真实峰值（防止削波） volume=1.3 声音调成原来的1.3倍
-    let iter = FfmpegCommand::new()
+    let mut process = FfmpegCommand::new()
         .input(&input_path)
         .args(&[
             "-af",
@@ -646,13 +654,15 @@ pub fn adjust_normalized_voice(
         .output(output_path.as_ref().to_string_lossy())
         .print_command()
         .spawn()
-        .with_context(|| format!("ffmpeg spawn for increase voice {multiple} failed"))?
+        .with_context(|| format!("ffmpeg spawn for increase voice {multiple} failed"))?;
+
+    let iter = process
         .iter()
         .with_context(|| format!("ffmpeg iter for increase voice {multiple} failed"))?;
 
     for event in iter.into_iter() {
         if cancel.load(Ordering::Relaxed) {
-            return Ok(());
+            break;
         }
 
         match event {
@@ -671,6 +681,9 @@ pub fn adjust_normalized_voice(
             _ => (),
         }
     }
+
+    _ = process.kill();
+    _ = process.wait();
 
     Ok(())
 }
@@ -735,18 +748,20 @@ where
             .args(&["-disposition:s:0", "default"]);
     }
 
-    let iter = command
+    let mut process = command
         .overwrite()
         .output(output_path.as_ref().to_string_lossy())
         .print_command()
         .spawn()
-        .with_context(|| format!("ffmpeg spawn for add subtitle {subtitle_path} failed"))?
+        .with_context(|| format!("ffmpeg spawn for add subtitle {subtitle_path} failed"))?;
+
+    let iter = process
         .iter()
         .with_context(|| format!("ffmpeg iter for add subtitle {subtitle_path} failed"))?;
 
     for event in iter.into_iter() {
         if cancel.load(Ordering::Relaxed) {
-            return Ok(());
+            break;
         }
 
         match event {
@@ -765,6 +780,9 @@ where
             _ => (),
         }
     }
+
+    _ = process.kill();
+    _ = process.wait();
 
     Ok(())
 }

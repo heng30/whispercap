@@ -132,7 +132,7 @@ pub fn save_as_vtt(subtitle: &[Subtitle], path: impl AsRef<Path>) -> Result<()> 
 pub fn save_as_txt(subtitle: &[Subtitle], path: impl AsRef<Path>) -> Result<()> {
     let contents = subtitle
         .iter()
-        .map(|item| format!("{}\n\n", subtitle_to_plain(&item)))
+        .map(|item| format!("{} ", subtitle_to_plain(&item)))
         .collect::<String>();
 
     fs::write(path.as_ref(), contents)

@@ -82,6 +82,9 @@ pub fn init(ui: &AppWindow) {
                 "recover-subtitles-timestamp" => {
                     global_logic!(ui).invoke_recover_subtitles_timestamp();
                 }
+                "adjust-overlap-timestamp" => {
+                    global_logic!(ui).invoke_adjust_overlap_timestamp();
+                }
 
                 // ============= subtitle entry ================ //
                 "split-subtitle" => {
